@@ -1,0 +1,99 @@
+<!doctype html><meta charset="utf-8"><title>Water regression checks</title>
+<pre id="result">RUNNING</pre>
+<iframe id="preview" style="width:900px;height:650px;border:0"></iframe>
+<script type="module">
+import { SlidingWater, condensationHash } from '../water.js';
+import { CondensationRegions } from '../condensation.js';
+const results = [];
+function check(condition,message) { if (!condition) throw new Error(message); results.push('PASS '+message); document.querySelector('#result').textContent=results.join('\n'); }
+try {
+  const regionalParameters = { density:.72,size:1,slideRatio:.12,tailLength:.85,
+    regionCount:4,regionIntensity:.7,regionSize:1,microDensity:.8,regionBlur:.65 };
+  const regions = new CondensationRegions(regionalParameters,123);
+  check(regions.update(1.4),'initial moisture field generated');
+  check(!regions.update(1.4),'unchanged field stays cached');
+  const regionalWater = new SlidingWater(regionalParameters,123,regions);
+  regionalWater.resize(1.4); regionalWater.update(.1);
+  const growing = regionalWater.drops.find(d=>d.fromRegion);
+  check(!!growing,'drop originates inside a condensation region');
+  check(regions.sample(growing.x,growing.y)>.1,'birth lies in moist interior');
+  const birthY = growing.y, birthRadius = growing.radius;
+  for (let i=0;i<120;i++) regionalWater.update(1/30);
+  check(growing.y===birthY && growing.radius>birthRadius,'drop grows in place before sliding');
+  for (let i=0;i<1000;i++) regionalWater.update(1/30);
+  check(growing.growth===1 && growing.y<birthY,'grown drop releases downward');
+  regionalParameters.regionCount = 0; regions.update(1.4);
+  check(regions.sample(.5,.5)===0 && regions.birth(()=>.5)===null,'zero regions disables field and new regional births');
+  const parameters = { density:.72,size:1,slideRatio:.12,speed:.55,tailLength:.85 };
+  const water = new SlidingWater(parameters,123);
+  water.resize(1.4);
+  water.update(1/30); water.paint();
+  check(water.drops.length > 0 && water.drops.length <= 14,'bounded active drop count');
+  check(new Set(water.drops.map(d=>d.velocity)).size > 1,'independent velocities');
+  check(water.condensation.length > water.drops.length*10,'majority stationary');
+  const y = water.drops.map(d=>d.y), time = water.time;
+  water.update(0);
+  check(water.time === time && water.drops.every((d,i)=>d.y===y[i]),'pause freezes simulation');
+  for (let i=0;i<3600;i++) water.update(1/30);
+  water.paint();
+  check(water.merges > 0,'contact absorption occurs');
+  check(water.segments.length <= 640,'trail storage remains bounded');
+  check(water.drops.every(d=>Number.isFinite(d.x+d.y+d.radius) && d.targetVolume<=3.4),'finite positions and bounded volume');
+  check(water.segments.some(s=>!s.spot),'motion deposits trails');
+  parameters.slideRatio = 0;
+  for (let i=0;i<1800;i++) water.update(1/30);
+  check(water.drops.length === 0,'ratio zero retires moving beads');
+  check(water.segments.length === 0,'old trails expire');
+  parameters.slideRatio = .4; parameters.size = 1.7; parameters.tailLength = 2;
+  water.resize(.46); water.update(.1); water.paint();
+  check(water.drops.length <= 14 && water.bodyCanvas.width <= 768,'portrait resize and maximum settings');
+  const mergeCount = water.merges;
+  water.reset(123); water.paint();
+  check(water.merges === 0 && water.segments.length === 0 && water.condensation.every(d=>d.absorbedUntil === 0),'reset clears trails and merge history');
+  check(JSON.stringify(condensationHash(-4,8,123))===JSON.stringify(condensationHash(2035,8,123)),'negative cell coordinates wrap consistently');
+  const portrait = new SlidingWater({...parameters,slideRatio:.01},123);
+  portrait.resize(.46); portrait.update(.1);
+  check(portrait.drops.length===1 && portrait.drops[0].y>1 && portrait.drops[0].runLength>1,'single-bead mobile budget still provides a central crossing drop');
+  results.push('MERGES observed during run: '+mergeCount);
+  const frame = document.querySelector('#preview');
+  frame.src = '../index.html';
+  frame.onload = async () => {
+    for(let i=0;i<200 && !frame.contentDocument.querySelector('#status').hidden;i++) await new Promise(resolve=>setTimeout(resolve,100));
+    try {
+      const doc = frame.contentDocument;
+      const canvas = doc.querySelector('#experiment canvas');
+      check(!!canvas,'Three.js canvas created');
+      const gl = canvas.getContext('webgl2');
+      const program = gl.getParameter(gl.CURRENT_PROGRAM);
+      check(!!program && gl.getProgramParameter(program,gl.LINK_STATUS),'GLSL program compiled and linked');
+      check(doc.querySelector('#status').hidden,'first frame rendered without startup error');
+      check(!doc.querySelector('.controls, input[type=range]'),'exhibition panel removed');
+      const fixed = (await frame.contentWindow.eval("import("+JSON.stringify(new URL('../main.js',import.meta.url).href)+")")).parameters;
+      const expected = { density:.5,size:.8,refraction:1,fog:.8,slideRatio:.2,speed:2,tailLength:.85,streakStrength:2,regionCount:4,regionIntensity:.5,regionSize:1.4,microDensity:.8,regionBlur:1,wipeStrength:.5,wipeRange:.5,refogSpeed:1 };
+      for (const [key,value] of Object.entries(expected)) check(fixed[key]===value,'fixed '+key);
+      for (const [name,value] of Object.entries({uDensity:.5,uSize:.8,uRefraction:1,uFog:.8,uStreakStrength:2,uRegionBlur:1})) {
+        const location = gl.getUniformLocation(program,name);
+        check(location!==null && Math.abs(gl.getUniform(program,location)-value)<.00001,'GPU uniform '+name);
+      }
+      const live = new SlidingWater(fixed,123); live.resize(1.4); live.update(.5*fixed.speed); live.paint();
+      check(live.time===1 && live.drops.length>0,'fixed speed advances moving drops');
+      const artworkAspect = gl.getUniformLocation(program,'uBackgroundAspect');
+      check(artworkAspect!==null && Math.abs(gl.getUniform(program,artworkAspect)-4000/2250)<.00001,'artwork fit uses actual image aspect');
+      const logo = doc.querySelector('.brand-logo');
+      await logo.decode();
+      check(logo.complete && logo.naturalWidth>0 && logo.naturalHeight>0,'local logo image loads');
+      check(logo.closest('header') && !logo.closest('#experiment'),'logo remains outside refracting canvas');
+      for (const width of [390,1280]) {
+        frame.style.width=width+'px';
+        await new Promise(resolve=>setTimeout(resolve,150));
+        const box=logo.getBoundingClientRect();
+        check(Math.abs(box.width/box.height-logo.naturalWidth/logo.naturalHeight)<.01,'logo aspect preserved at '+width);
+        check(box.left>=0 && box.right<=width,'logo fits viewport at '+width);
+        const tools=doc.querySelector('.gesture-tools').getBoundingClientRect();
+        check(box.right<=tools.left || box.bottom<=tools.top || box.top>=tools.bottom,'logo does not overlap camera tools at '+width);
+      }
+      document.querySelector('#result').textContent = results.join('\n')+'\nALL CHECKS PASSED';
+    } catch(error) { document.querySelector('#result').textContent = results.join('\n')+'\nFAIL '+error.stack+'\n'+frame.contentDocument.querySelector('#status')?.textContent; }
+  };
+} catch(error) { document.querySelector('#result').textContent = results.join('\n')+'\nFAIL '+error.stack; }
+</script>

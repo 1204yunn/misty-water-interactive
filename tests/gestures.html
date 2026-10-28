@@ -1,0 +1,86 @@
+<!doctype html><meta charset="utf-8"><title>Gesture drawing checks</title>
+<pre id="result">RUNNING</pre>
+<iframe id="preview" style="width:900px;height:650px;border:0"></iframe>
+<script type="module">
+import { isOneGesture, GesturePen, segmentCrossesRect } from '../gestures.js';
+import { drawingDensity, CondensationRegions } from '../condensation.js';
+const results=[];
+function check(condition,message) { if(!condition) throw new Error(message); results.push('PASS '+message); }
+// Anatomical joint fixtures, including rotations: no reliance on tip.y < pip.y.
+function hand(open=[5]) {
+  const points=Array.from({length:21},()=>({x:.5,y:.8,z:0}));
+  points[0]={x:.5,y:.9,z:0};
+  for (const [i,x] of [[5,.38],[9,.48],[13,.58],[17,.68]]) {
+    points[i]={x,y:.65,z:0}; points[i+1]={x,y:.48,z:0};
+    points[i+2]={x,y:open.includes(i) ? .34 : .55,z:open.includes(i) ? 0 : -.06};
+    points[i+3]={x,y:open.includes(i) ? .23 : .66,z:open.includes(i) ? 0 : -.07};
+  }
+  return points;
+}
+try {
+  const one=hand();
+  check(isOneGesture(one),'index only starts drawing');
+  check(!isOneGesture(hand([])),'fist never draws');
+  check(!isOneGesture(hand([5,9])),'two fingers never draw');
+  check(!isOneGesture(hand([5,9,13,17])),'open palm never draws');
+  const rotated=one.map(p=>({x:1-p.y,y:p.x,z:p.z}));
+  check(isOneGesture(rotated),'gesture tolerates sideways hand');
+  const pen=new GesturePen();
+  check(pen.process(one,one,0,'Left').state==='detected','two valid frames required to enter');
+  const moved=one.map(p=>({...p,x:p.x+.04}));
+  let result=pen.process(moved,moved,70,'Left');
+  check(result.state==='drawing' && result.point.x<1-one[8].x,'front camera mirrors x once');
+  check(result.from===result.point,'new stroke starts without connecting previous position');
+  const missing=pen.process(null,null,140);
+  check(missing.state==='missing' && !missing.point && !missing.from,'missing hand never paints');
+  check(pen.process(null,null,280).state==='missing' && !pen.point,'long tracking loss resets stroke');
+  pen.process(one,one,310,'Left'); result=pen.process(moved,moved,380,'Left');
+  check(result.from===result.point,'reacquisition creates a new stroke');
+  check(pen.process(hand([5,9]),hand([5,9]),350,'Left').state==='detected' && !pen.point,'gesture exit immediately stops drawing');
+  pen.process(one,one,420,'Left'); pen.process(moved,moved,490,'Left');
+  check(pen.process(moved,moved,900,'Left').state==='detected','stale video breaks stroke');
+  pen.reset(); pen.process(one,one,0,'Left');
+  const jump=one.map(p=>({...p,x:p.x-.3}));
+  check(pen.process(jump,jump,70,'Left').state==='detected','tracking jump cannot connect distant points');
+  const rect={left:40,right:60,top:40,bottom:60};
+  check(segmentCrossesRect({x:0,y:50},{x:100,y:50},rect),'segment crossing panel blocked even when endpoints outside');
+  check(!segmentCrossesRect({x:0,y:20},{x:100,y:20},rect),'drawing outside panel remains enabled');
+  check(Math.abs(drawingDensity(.5,.5)-.35)<.001,'central small-bead density reduced by 65 percent');
+  let centerMean=0;
+  for(let y=0;y<40;y++) for(let x=0;x<40;x++) centerMean+=drawingDensity(.21+(x+.5)/40*.58,.225+(y+.5)/40*.55)/1600;
+  check(centerMean>=.3 && centerMean<=.4,'average density across central 58 by 55 percent area reduced by 60 to 70 percent');
+  for(const [x,y] of [[.05,.5],[.95,.5],[.5,.05],[.5,.95]]) check(drawingDensity(x,y)>.98,'edge density retained '+x+'/'+y);
+  const regions=new CondensationRegions({regionCount:4,regionIntensity:.7,regionSize:1},123);
+  regions.update(1.4);
+  check(regions.zones.every(z=>z.x/1.4<.15 || z.x/1.4>.85 || z.y<.15 || z.y>.85),'all four condensation regions sit at perimeter');
+  const frame=document.getElementById('preview');
+  await new Promise(resolve=> { frame.onload=resolve; frame.src='../index.html'; });
+  const doc=frame.contentDocument,win=frame.contentWindow;
+  for(let i=0;i<200 && !doc.getElementById('status').hidden;i++) await new Promise(resolve=>setTimeout(resolve,100));
+  check(doc.getElementById('status').hidden,'integrated application renders');
+  const clear=doc.getElementById('clear-strokes'); clear.click();
+  check(doc.getElementById('camera-toggle').textContent==='啟動攝影機','camera stays off until requested');
+  // Fake-media smoke test is opt-in so ordinary regression never opens a camera.
+  if(new URLSearchParams(location.search).has('camera')) {
+    doc.getElementById('camera-toggle').click();
+    await new Promise((resolve,reject)=> {
+      const start=performance.now();
+      const timer=setInterval(()=> {
+        const button=doc.getElementById('camera-toggle');
+        if(button.getAttribute('aria-pressed')==='true') { clearInterval(timer); resolve(); }
+        else if(performance.now()-start>55000 || /失敗|中斷|未開啟/.test(doc.getElementById('gesture-status').textContent)) {
+          clearInterval(timer); reject(new Error(doc.getElementById('gesture-status').textContent));
+        }
+      },100);
+    });
+    check(doc.getElementById('camera-toggle').getAttribute('aria-pressed')==='true','localhost permission and actual MediaPipe worker/model initialize');
+    await new Promise(resolve=>setTimeout(resolve,1800));
+    check(doc.getElementById('camera-toggle').getAttribute('aria-pressed')==='true','actual camera frames are processed without runtime errors');
+    check(['未偵測','已偵測','正在繪畫'].includes(doc.getElementById('gesture-status').textContent),'actual landmark inference returns frame results');
+    doc.getElementById('camera-toggle').click();
+    check(doc.getElementById('camera-toggle').getAttribute('aria-pressed')==='false','camera shuts down cleanly');
+  }
+  check(!doc.querySelector('.controls'),'parameter panel absent');
+  document.getElementById('result').textContent=results.join('\n')+'\nALL CHECKS PASSED';
+} catch(error) { document.getElementById('result').textContent=results.join('\n')+'\nFAIL '+error.stack; }
+</script>

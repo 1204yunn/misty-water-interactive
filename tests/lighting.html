@@ -1,0 +1,71 @@
+<!doctype html><meta charset="utf-8"><title>Lighting and reflection checks</title>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+<pre id="result">RUNNING</pre>
+<script type="module">
+import * as THREE from 'three';
+const output=document.querySelector('#result'), results=[];
+function check(ok,label) { if(!ok) throw new Error(label); results.push('PASS '+label); output.textContent=results.join('\n'); }
+try {
+  // Execute the production GLSL against controlled texture fields, including
+  // a synthetic camera pattern, without requesting a visitor's real camera.
+  const sourceUrl=new URLSearchParams(location.search).get('source') || '../main.js';
+  const source=await (await fetch(sourceUrl)).text();
+  const shader=source.match(/const fragmentShader = \/\* glsl \*\/`([\s\S]*?)`;/)[1];
+  const prefix=shader.slice(0,shader.indexOf('void main()'));
+  const renderer=new THREE.WebGLRenderer({preserveDrawingBuffer:true});
+  renderer.setSize(320,200); document.body.append(renderer.domElement);
+  const scene=new THREE.Scene(), camera=new THREE.Camera();
+  const solid=(r,g,b,a=255)=>{
+    const t=new THREE.DataTexture(new Uint8Array([r,g,b,a]),1,1);
+    t.needsUpdate=true;return t;
+  };
+  const pattern=document.createElement('canvas'); pattern.width=320;pattern.height=200;
+  const ctx=pattern.getContext('2d');
+  for(let x=0;x<320;x++) {ctx.fillStyle=(Math.floor(x/4)%2) ? '#b8b8b8':'#484848';ctx.fillRect(x,0,1,200);}
+  const uniforms={
+    uResolution:{value:new THREE.Vector2(320,200)},uBackground:{value:solid(255,255,255)},uBackgroundAspect:{value:16/9},
+    uCamera:{value:new THREE.CanvasTexture(pattern)},uCameraReady:{value:0},uCameraAspect:{value:1.6},
+    uWater:{value:solid(0,0,0)},uTracks:{value:solid(0,0,0)},uWaterTexel:{value:new THREE.Vector2(1/320,1/200)},
+    uWipe:{value:solid(128,128,0,0)},uCondensation:{value:solid(0,0,255)},
+    uStreakStrength:{value:2},uTime:{value:0},uSeed:{value:123},uDensity:{value:0},uSize:{value:.8},
+    uRefraction:{value:1},uFog:{value:.8},uPointer:{value:new THREE.Vector2(-2,-2)},uTouch:{value:0},
+    uMicroDensity:{value:0},uRegionBlur:{value:1},
+  };
+  let shaderError=false;renderer.debug.onShaderError=()=>{shaderError=true;};
+  const material=new THREE.ShaderMaterial({uniforms,vertexShader:'varying vec2 vUv; void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',fragmentShader:shader});
+  scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),material));
+  function render(probe=false) {
+    material.fragmentShader=probe ? prefix+'void main(){gl_FragColor=vec4(background(vUv),1.0);}' : shader;
+    material.needsUpdate=true;renderer.render(scene,camera);
+    const gl=renderer.getContext(),pixels=new Uint8Array(320*200*4);
+    gl.readPixels(0,0,320,200,gl.RGBA,gl.UNSIGNED_BYTE,pixels);return pixels;
+  }
+  function stats(pixels,x0=0,x1=320) {
+    let sum=0,squared=0,n=0;
+    for(let y=35;y<165;y++)for(let x=x0;x<x1;x++) {
+      const i=(y*320+x)*4,l=(pixels[i]*.2126+pixels[i+1]*.7152+pixels[i+2]*.0722)/255;
+      sum+=l;squared+=l*l;n++;
+    }
+    return {mean:sum/n,contrast:Math.sqrt(Math.max(0,squared/n-(sum/n)**2))};
+  }
+  const background=render(true),left=stats(background,10,70),right=stats(background,250,310);
+  const backdrop=stats(background).mean;
+  results.push('METRIC background='+backdrop.toFixed(3)+' left='+left.mean.toFixed(3)+' right='+right.mean.toFixed(3));
+  const plain=render();
+  uniforms.uCondensation.value=solid(115,0,255);
+  const fog=render(),fogLift=stats(fog).mean-stats(plain).mean;
+  results.push('METRIC dense fog lift='+fogLift.toFixed(3));
+  uniforms.uCameraReady.value=1;
+  const misted=stats(render());
+  uniforms.uWipe.value=solid(128,128,0,255);
+  const wiped=stats(render());
+  results.push('METRIC camera contrast misted='+misted.contrast.toFixed(3)+' wiped='+wiped.contrast.toFixed(3));
+  check(!shaderError,'production shader and background probe compile');
+  check(backdrop>.58 && backdrop<.82,'artwork graded darker without crushing shadows');
+  check(left.mean>right.mean+.08,'left daylight remains brighter than right');
+  check(fogLift>.008 && fogLift<.12,'local translucent fog separates from background');
+  check(wiped.contrast>misted.contrast*1.6,'wiping reveals stronger camera detail');
+  check(wiped.mean>.3,'wiped camera stays visible without a dark overlay');
+  output.textContent=results.join('\n')+'\nALL CHECKS PASSED';
+} catch(error) { output.textContent=results.join('\n')+'\nFAIL '+error.stack; }
+</script>

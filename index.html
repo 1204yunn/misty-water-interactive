@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#a8c1cc">
+  <title>有點濕濕的 — 正式展示版 V2</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+  </script>
+</head>
+<body>
+  <main id="experiment" aria-label="霧面玻璃與凝結水滴互動實驗"></main>
+  <header class="identity"><span class="eyebrow">MISTY WATER LAB / EXPERIMENT 01</span><h1><img class="brand-logo" src="./assets/logo.png" width="1754" height="1241" alt="有點濕濕的" decoding="async"></h1></header>
+  <div class="bottom-note">GLASS STUDY <span>01 — CONDENSATION</span></div>
+  <aside class="gesture-tools" aria-label="手勢繪畫控制">
+    <div class="actions"><button id="camera-toggle" type="button" aria-pressed="false">啟動攝影機</button><button id="clear-strokes" type="button">清除筆跡</button></div>
+    <p id="gesture-status" role="status" aria-live="polite" data-state="missing">未偵測 · 攝影機未啟動</p>
+    <p class="gesture-hint">☝ 擦拭霧氣　✌ 拍下這一刻</p>
+    <p class="hint">伸直食指、收起中指／無名指／小指。<br>也可用滑鼠拖曳；影像僅在此裝置辨識。</p>
+  </aside>
+  <audio id="ambient-rain" src="./assets/misty_soft_rain_ambient.mp3" loop preload="none"></audio>
+  <button id="sound-toggle" class="sound-toggle" type="button" aria-label="播放雨聲" aria-pressed="false" title="播放雨聲"><span aria-hidden="true">♪</span></button>
+  <script type="module" src="./audio.js"></script>
+  <div id="gesture-cursor" hidden aria-hidden="true"></div>
+  <div id="photo-countdown" class="photo-countdown" role="status" aria-live="assertive" hidden></div>
+  <p id="photo-notice" class="photo-notice" role="status" aria-live="polite"></p>
+  <dialog id="photo-preview" class="photo-preview" aria-labelledby="photo-title" aria-describedby="photo-message">
+    <h2 id="photo-title">留下這一刻</h2>
+    <img id="photo-image" alt="剛拍下的霧面玻璃與人物倒影作品">
+    <p id="photo-message" role="status" aria-live="polite"></p>
+    <div class="actions"><button id="photo-retake" type="button">重新拍攝</button><button id="photo-story" type="button">留下我的故事</button></div>
+  </dialog>
+  <p id="status" role="status">正在凝結…</p>
+  <noscript>請啟用 JavaScript 以顯示玻璃水滴。</noscript>
+  <script type="module">
+    import('./main.js').catch(error => {
+      console.error(error);
+      const status = document.getElementById('status');
+      status.hidden = false;
+      status.textContent = '無法啟動實驗，請確認 assets/background.png 存在、網路可連線至 jsDelivr，並使用 Live Server 開啟。';
+    });
+  </script>
+</body>
+</html>
+

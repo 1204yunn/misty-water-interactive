@@ -1,0 +1,86 @@
+:root { color-scheme: light; font-family: "Helvetica Neue", "Noto Sans TC", Arial, sans-serif; color: #243e4b; background: #788994; }
+* { box-sizing: border-box; }
+body { margin: 0; overflow: hidden; }
+#experiment { position: fixed; inset: 0; background: #788994 url("./assets/background.png") center / contain no-repeat; background-blend-mode: multiply; }
+canvas { display: block; width: 100%; height: 100%; }
+#experiment canvas { touch-action: none; user-select: none; -webkit-user-select: none; }
+.gesture-tools { touch-action: pan-y; overscroll-behavior: contain; }
+.gesture-tools { position: fixed; z-index: 2; top: max(20px, env(safe-area-inset-top)); right: 28px; width: 250px; padding: 12px 14px; border: 1px solid #ffffff70; border-radius: 12px; background: #edf5f4dd; }
+.gesture-tools .actions { margin-top: 0; }
+.gesture-tools > p { display: none; }
+#gesture-status { font-size: 12px; margin: 10px 0 0; line-height: 1.5; }
+#gesture-status[data-state=drawing] { color: #465967; font-weight: 600; }
+#gesture-status[data-state=ya]::before { content: ''; display: inline-block; width: 13px; height: 13px; margin-right: 6px; vertical-align: -2px; border-radius: 50%; background: conic-gradient(#72818e var(--ya-progress,0deg),#72818e22 0); mask: radial-gradient(circle,transparent 48%,#000 53%); }
+#gesture-cursor { position: fixed; top: 0; left: 0; width: 14px; height: 14px; margin: -7px; border: 1px solid #e0eeee; border-radius: 50%; box-shadow: 0 0 0 2px #29485b88; pointer-events: none; z-index: 1; }
+.bottom-note { pointer-events: none; }
+.identity { position: fixed; top: max(40px, env(safe-area-inset-top)); left: 5vw; z-index: 1; pointer-events: none; }
+.eyebrow { font-size: 10px; letter-spacing: .22em; }
+h1 { margin: 27px 0 0; font-size: clamp(24px, 3.6vw, 51.2px); font-weight: 400; letter-spacing: .13em; }
+.identity h1 { position: relative; top: -70px; left: -50px; margin: 8px 0 0; }
+.brand-logo { display: block; width: clamp(150px, 24vw, 300px); max-width: 40vw; height: auto; object-fit: contain; }
+.identity p { font-size: 11px; letter-spacing: .18em; opacity: .7; }
+.bottom-note { position: fixed; bottom: max(30px, env(safe-area-inset-bottom)); left: 5vw; font-size: 9px; letter-spacing: .18em; }
+.bottom-note span { margin-left: 24px; opacity: .6; }
+.actions { display: flex; gap: 8px; margin-top: 12px; }
+button { min-height: 36px; flex: 1; border: 1px solid #55768644; border-radius: 5px; background: #ffffff36; color: inherit; cursor: pointer; font: inherit; font-size: 11px; }
+button:hover { background: #ffffff80; }
+:focus-visible { outline: 2px solid #355f76; outline-offset: 3px; }
+.hint { font-size: 10px; line-height: 1.8; opacity: .6; margin-bottom: 0; }
+#status { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: 85vw; padding: 18px 24px; border-radius: 8px; background: #edf5f4e6; font-size: 13px; line-height: 1.8; }
+#status[hidden] { display: none; }
+@media (max-width: 600px) { .identity { top: max(28px, env(safe-area-inset-top)); left: 7vw; } .eyebrow { font-size: 8px; } h1 { margin-top: 22px; } .bottom-note { left: 7vw; bottom: 27px; font-size: 8px; writing-mode: vertical-rl; } .bottom-note span { margin: 14px 0 0; } }
+@media (max-width: 600px) {
+  /* Keep the established desktop offset; constrain only the small-screen
+     overflow caused by the existing negative Logo offsets. Size is unchanged. */
+  .identity h1 { top: -28px; left: max(-50px, -7vw); }
+  .gesture-tools { top: auto; bottom: max(76px,calc(env(safe-area-inset-bottom) + 58px)); right: 16px; width: 218px; }
+  .gesture-tools .hint { font-size: 9px; }
+}
+
+.sound-toggle {
+  position: fixed; z-index: 3;
+  right: max(22px, env(safe-area-inset-right));
+  bottom: max(22px, env(safe-area-inset-bottom));
+  width: 30px; height: 30px; min-height: 30px; padding: 0;
+  display: grid; place-items: center; border-radius: 50%;
+  border: 1px solid #6c91a04d; background: #a8c1cc66;
+  color: #38596a; font-size: 18px; line-height: 1;
+  opacity: .66; touch-action: manipulation;
+  transition: background .3s, opacity .3s, box-shadow .3s;
+}
+.sound-toggle:hover { background: #a8c1cc99; opacity: .9; }
+.sound-toggle[aria-pressed="true"] {
+  background: #87acbe99; opacity: .9;
+  box-shadow: 0 0 0 2px #a8c1cc33;
+}
+.gesture-hint { font-size: 11px; line-height: 1.8; opacity: .75; margin: 9px 0 0; }
+.photo-countdown {
+  position: fixed; inset: 0; z-index: 4; pointer-events: none;
+  display: grid; place-items: center;
+  font-size: clamp(80px, 16vw, 160px); font-weight: 300;
+  color: #edf5f0b8; text-shadow: 0 2px 25px #36556533;
+}
+.photo-countdown[hidden] { display: none; }
+.photo-notice {
+  position: fixed; z-index: 4; bottom: max(28px, env(safe-area-inset-bottom));
+  left: 50%; transform: translateX(-50%); width: min(70vw, 460px);
+  margin: 0; font-size: 12px; text-align: center; line-height: 1.8;
+  color: #243e4b; pointer-events: none;
+}
+.photo-notice:empty { display: none; }
+.photo-preview {
+  width: min(92vw, 760px); max-height: 92dvh; overflow: auto;
+  padding: 20px; border: 1px solid #ffffff99; border-radius: 16px;
+  background: #e6efef; color: #243e4b; box-shadow: 0 20px 80px #28465544;
+}
+.photo-preview::backdrop { background: #4d697573; backdrop-filter: blur(6px); }
+.photo-preview h2 { margin: 0 0 14px; font-size: 18px; font-weight: 400; }
+#photo-image { display: block; max-width: 100%; max-height: 62dvh; width: auto; height: auto; margin: auto; object-fit: contain; }
+#photo-message { font-size: 12px; line-height: 1.8; }
+.photo-preview button { background: #c5d8df80; }
+.photo-preview button:disabled { opacity: .5; cursor: wait; }
+@media (max-width:600px) {
+  .photo-preview { padding: 14px; }
+  .gesture-hint { font-size: 10px; }
+  .photo-notice { bottom: max(20px, env(safe-area-inset-bottom)); font-size: 11px; width: 65vw; }
+}

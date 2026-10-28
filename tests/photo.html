@@ -1,0 +1,111 @@
+<!doctype html><meta charset="utf-8"><title>YA photo flow checks</title>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+<pre id="result">RUNNING</pre>
+<div id="photo-countdown" hidden style="position:fixed;inset:0;color:red;font-size:150px">3</div>
+<p id="photo-notice"></p>
+<dialog id="photo-preview"><img id="photo-image"><p id="photo-message"></p><button id="photo-retake">重新拍攝</button><button id="photo-story">留下我的故事</button></dialog>
+<script type="module">
+import * as THREE from 'three';
+import { isYaGesture, isOneGesture, YaHold, GesturePen } from '../gestures.js';
+import { PhotoBooth, captureComposite } from '../photo.js';
+import { loadPhoto, PHOTO_DB, PHOTO_STORE } from '../photo-store.js';
+const results=[], output=document.querySelector('#result');
+function check(ok,label) {if(!ok) throw new Error(label);results.push('PASS '+label);output.textContent=results.join('\n');}
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function until(test) {for(let n=0;n<200;n++){if(test())return;await wait(20);}throw new Error('Async photo operation timed out');}
+function hand(open=[5]) {
+ const p=Array.from({length:21},()=>({x:.5,y:.8,z:0}));p[0]={x:.5,y:.9,z:0};
+ for(const [i,x] of [[5,.38],[9,.48],[13,.58],[17,.68]]) {
+  p[i]={x,y:.65,z:0};p[i+1]={x,y:.48,z:0};
+  p[i+2]={x,y:open.includes(i) ? .34:.55,z:open.includes(i) ? 0:-.06};
+  p[i+3]={x,y:open.includes(i) ? .23:.66,z:open.includes(i) ? 0:-.07};
+ }return p;
+}
+try {
+ const ya=hand([5,9]), one=hand([5]);
+ check(isYaGesture(ya) && !isOneGesture(ya),'YA recognized without index drawing');
+ check(isOneGesture(one) && !isYaGesture(one),'original index gesture remains exclusive');
+ check(!isYaGesture(hand([])) && !isYaGesture(hand([5,9,13,17])),'fist and open palm do not photograph');
+ check(isYaGesture(ya.map(p=>({x:1-p.y,y:p.x,z:p.z}))),'YA tolerates rotated hands');
+ const hold=new YaHold();
+ const tolerant=new YaHold();
+ tolerant.process(true,0,'Left');tolerant.process(true,100,'Left');
+ tolerant.process(null,170,'Left');
+ check(tolerant.process(true,240,'Left').progress===100/1500,'short missing interval pauses YA progress');
+ tolerant.process(false,300,'Left');
+ check(tolerant.since===null && tolerant.elapsed===0,'observed non-YA clears all hold progress');
+ const mirrored=ya.map(p=>({x:1-p.x,y:p.y,z:p.z}));
+ check(isYaGesture(mirrored),'YA supports mirrored hand');
+ check(isOneGesture(one.map(p=>({x:p.x*.4,y:p.y*.4,z:p.z*.4}))),'index supports smaller hands');
+ for(let t=0;t<1500;t+=100) check(!hold.process(true,t,'Left').trigger,'no early trigger at '+t);
+ check(hold.process(true,1500,'Left').trigger,'1500ms uninterrupted YA triggers');
+ check(!hold.process(true,1700,'Left').trigger,'held YA cannot repeat');
+ hold.reset();check(!hold.process(true,1900,'Left').trigger,'reset preserves release latch');
+ hold.process(false,2000);for(let t=2100;t<=3600;t+=100) hold.process(true,t,'Left');
+ check(hold.locked,'release permits another stable trigger');
+ hold.process(false,3700);hold.process(true,3800,'Left');hold.process(true,4200,'Left');
+ check(hold.since===4200,'inference gap resets stability clock');
+ hold.process(true,4300,'Right');check(hold.since===4300,'switching hands restarts hold');
+ hold.process(false,4400);check(hold.since===null,'lost gesture clears hold');
+ const pen=new GesturePen();pen.process(one,one,0);check(pen.process(one,one,70).state==='drawing','index drawing still works');
+
+ // Real production GLSL + controlled mirrored camera, fog, water and wipe maps.
+ const source=await (await fetch('../main.js')).text();
+ const shader=source.match(/const fragmentShader = \/\* glsl \*\/`([\s\S]*?)`;/)[1];
+ const solid=(r,g,b,a=255)=>{const t=new THREE.DataTexture(new Uint8Array([r,g,b,a]),1,1);t.needsUpdate=true;return t;};
+ const cameraImage=document.createElement('canvas');cameraImage.width=64;cameraImage.height=64;
+ const cameraCtx=cameraImage.getContext('2d');cameraCtx.fillStyle='#638aab';cameraCtx.fillRect(0,0,64,64);
+ cameraCtx.fillStyle='#be917c';cameraCtx.fillRect(10,8,24,45);
+ const wipe=solid(128,128,0,180);
+ const uniforms={uResolution:{value:new THREE.Vector2(320,200)},uBackground:{value:solid(200,210,220)},uBackgroundAspect:{value:1.6},
+ uCamera:{value:new THREE.CanvasTexture(cameraImage)},uCameraReady:{value:1},uCameraAspect:{value:1.6},uWater:{value:solid(60,0,0)},
+ uTracks:{value:solid(40,80,0)},uWaterTexel:{value:new THREE.Vector2(1/320,1/200)},uWipe:{value:wipe},uCondensation:{value:solid(100,80,255)},
+ uStreakStrength:{value:2},uTime:{value:0},uSeed:{value:123},uDensity:{value:.5},uSize:{value:.8},uRefraction:{value:1},uFog:{value:.8},
+ uPointer:{value:new THREE.Vector2(-2,-2)},uTouch:{value:0},uMicroDensity:{value:.8},uRegionBlur:{value:1}};
+ const renderer=new THREE.WebGLRenderer();renderer.setSize(320,200);document.body.append(renderer.domElement);
+ let shaderError=false;renderer.debug.onShaderError=()=>{shaderError=true;};
+ const scene=new THREE.Scene(), camera=new THREE.Camera();
+ scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),new THREE.ShaderMaterial({uniforms,
+ vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',fragmentShader:shader})));
+ let resets=0,captures=0,expectedPixel;
+ const booth=new PhotoBooth({onResetPen:()=>{resets++;pen.reset();},capture:canvas=>{
+  captures++;const gl=renderer.getContext();expectedPixel=new Uint8Array(4);gl.readPixels(160,99,1,1,gl.RGBA,gl.UNSIGNED_BYTE,expectedPixel);
+  return captureComposite(canvas);
+ }});
+ const data=t=>({landmarks:ya,world:ya,timestamp:t,hand:'Left'});
+ booth.observe(data(0),true);check(booth.blocksDrawing && resets>0,'first YA frame blocks drawing');
+ for(let t=100;t<=1500;t+=100)booth.observe(data(t),true);
+ check(booth.stage==='countdown' && booth.countdown.textContent==='3','stable YA starts countdown');
+ const deadline=booth.deadline;
+ booth.observe({landmarks:one,world:one,timestamp:1600,hand:'Left'},true);
+ check(booth.stage==='countdown','lowering YA does not stop countdown');
+ renderer.render(scene,camera);booth.afterRender(deadline-1900,true,renderer.domElement);
+ check(booth.countdown.textContent==='2' && captures===0,'countdown renders without premature capture');
+ renderer.render(scene,camera);booth.afterRender(deadline-900,true,renderer.domElement);
+ check(booth.countdown.textContent==='1' && wipe.image.data[3]===180,'last second preserves wipe field');
+ renderer.render(scene,camera);booth.afterRender(deadline,true,renderer.domElement);
+ await until(()=>booth.stage==='preview');await booth.image.decode();
+ check(!shaderError && captures===1 && booth.dialog.open,'production shader captured into preview');
+ check(booth.photo.width===320 && booth.photo.height===200 && booth.image.naturalWidth===320 && booth.image.naturalHeight===200,'capture preserves drawing-buffer dimensions');
+ const decoded=document.createElement('canvas');decoded.width=320;decoded.height=200;
+ const ctx=decoded.getContext('2d');ctx.drawImage(booth.image,0,0);
+ const pixel=ctx.getImageData(160,100,1,1).data;
+ check(pixel.every((v,i)=>Math.abs(v-expectedPixel[i])<=1),'PNG matches composed WebGL pixels and excludes countdown/UI');
+ booth.afterRender(deadline+4000,true,renderer.domElement);check(captures===1,'preview never repeats shutter');
+ await booth.save();const saved=await loadPhoto(booth.savedId);
+ check(saved.blob instanceof Blob && saved.blob.size===booth.photo.blob.size && saved.width===320,'IndexedDB stores and reads full PNG Blob');
+ check(booth.message.textContent.includes('尚未完成同來源串接') && location.pathname.endsWith('/photo.html'),'unconfigured message board retains photo without navigation');
+ const savedId=booth.savedId;
+ booth.retry();booth.observe(data(5000),true);
+ check(booth.stage==='live' && !booth.dialog.open && booth.hold.locked,'retake preserves YA release requirement');
+ booth.observe({landmarks:one,world:one,timestamp:5100},true);
+ check(!booth.blocksDrawing,'index drawing resumes after release');
+ for(let t=5200;t<=6700;t+=100)booth.observe(data(t),true);
+ check(booth.stage==='countdown','new YA after release can photograph again');
+ booth.afterRender(booth.deadline,false,renderer.domElement);
+ check(booth.stage==='live' && captures===1,'camera loss cancels countdown');
+ // Delete only this test's own stored record, leaving visitor works intact.
+ await new Promise((resolve,reject)=>{const r=indexedDB.open(PHOTO_DB,1);r.onsuccess=()=>{const db=r.result,t=db.transaction(PHOTO_STORE,'readwrite');t.objectStore(PHOTO_STORE).delete(savedId);t.oncomplete=()=>{db.close();resolve();};t.onerror=()=>reject(t.error);};});
+ output.textContent=results.join('\n')+'\nALL CHECKS PASSED';
+}catch(error){output.textContent=results.join('\n')+'\nFAIL '+error.stack;}
+</script>

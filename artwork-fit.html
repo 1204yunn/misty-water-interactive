@@ -1,0 +1,40 @@
+<!doctype html><meta charset="utf-8"><title>Complete artwork fit</title>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+<pre id="result">RUNNING</pre>
+<script type="module">
+import * as THREE from 'three';
+const results=[],output=document.querySelector('#result');
+function check(ok,label){if(!ok)throw new Error(label);results.push('PASS '+label);}
+try {
+ const source=await(await fetch('../main.js')).text();
+ const shader=source.match(/const fragmentShader = \/\* glsl \*\/`([\s\S]*?)`;/)[1];
+ const prefix=shader.slice(0,shader.indexOf('void main()'));
+ const image=await new THREE.TextureLoader().loadAsync('../assets/background.png');
+ check(image.image.width===4000&&image.image.height===2250,'original artwork is 4000x2250');
+ const data=new Uint8Array(64*36*4);
+ for(let y=0;y<36;y++)for(let x=0;x<64;x++){
+  const i=(y*64+x)*4;data[i]=x<4||x>=60?255:0;data[i+1]=y<3||y>=33?255:0;data[i+3]=255;
+ }
+ const texture=new THREE.DataTexture(data,64,36);texture.needsUpdate=true;
+ texture.minFilter=texture.magFilter=THREE.NearestFilter;
+ const uniforms={uResolution:{value:new THREE.Vector2()},uBackground:{value:texture},uBackgroundAspect:{value:16/9},uCameraReady:{value:0}};
+ const renderer=new THREE.WebGLRenderer({preserveDrawingBuffer:true});
+ const scene=new THREE.Scene(),camera=new THREE.Camera();
+ scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),new THREE.ShaderMaterial({uniforms,
+  vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',
+  fragmentShader:prefix+'void main(){gl_FragColor=vec4(background(vUv),1.);}'})));
+ for(const [w,h]of [[320,180],[320,200],[400,180],[240,320]]){
+  renderer.setSize(w,h);uniforms.uResolution.value.set(w,h);renderer.render(scene,camera);
+  const scale=Math.min(w/64,h/36),left=(w-64*scale)/2,bottom=(h-36*scale)/2;
+  const gl=renderer.getContext(),pixel=new Uint8Array(4);
+  // Red vertical borders and green horizontal borders must both remain visible.
+  for(const [x,y,label]of [[left+scale,bottom+scale,'lower left'],[left+63*scale,bottom+scale,'lower right'],[left+scale,bottom+35*scale,'upper left'],[left+63*scale,bottom+35*scale,'upper right']]){
+   gl.readPixels(Math.floor(x),Math.floor(y),1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel);
+   check(pixel[0]>100&&pixel[1]>100,`artwork ${label} retained at ${w}x${h}`);
+  }
+  check(gl.getError()===gl.NO_ERROR,'background shader renders without errors '+w+'x'+h);
+ }
+ renderer.dispose();texture.dispose();image.dispose();
+ output.textContent=results.join('\n')+'\nALL CHECKS PASSED';
+}catch(error){output.textContent=results.join('\n')+'\nFAIL '+error.stack;}
+</script>

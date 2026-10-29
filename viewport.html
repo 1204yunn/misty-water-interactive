@@ -1,0 +1,65 @@
+<!doctype html><meta charset="utf-8"><title>Viewport transition regression</title>
+<pre id="result">RUNNING</pre><iframe id="preview" style="width:1100px;height:650px;border:0"></iframe>
+<script type="module">
+const output=document.querySelector('#result'), frame=document.querySelector('#preview'), results=[];
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function check(ok,label){if(!ok)throw new Error(label);results.push('PASS '+label);output.textContent=results.join('\n');}
+try {
+ await new Promise(resolve=>{frame.onload=resolve;frame.src='../index.html';});
+ const win=frame.contentWindow,doc=frame.contentDocument;
+ for(let i=0;i<200&&!doc.querySelector('#status').hidden;i++)await wait(100);
+ check(doc.querySelector('#status').hidden,'application starts');
+ const canvas=doc.querySelector('canvas'),gl=canvas.getContext('webgl2');
+ const logo=doc.querySelector('.brand-logo');await logo.decode();
+ const image=document.createElement('canvas');image.width=logo.naturalWidth;image.height=logo.naturalHeight;
+ const ctx=image.getContext('2d');ctx.drawImage(logo,0,0);
+ const rgba=ctx.getImageData(0,0,image.width,image.height).data;
+ let minX=image.width,minY=image.height,maxX=0,maxY=0;
+ for(let y=0;y<image.height;y++)for(let x=0;x<image.width;x++)if(rgba[(y*image.width+x)*4+3]>8){minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);}
+ function uniform(name){const p=gl.getParameter(gl.CURRENT_PROGRAM);return gl.getUniform(p,gl.getUniformLocation(p,name));}
+ function mask(field='uWipe',point=null){
+  const active=gl.getParameter(gl.ACTIVE_TEXTURE),previous=gl.getParameter(gl.FRAMEBUFFER_BINDING);
+  gl.activeTexture(gl.TEXTURE0+uniform(field));
+  const fb=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,gl.getParameter(gl.TEXTURE_BINDING_2D),0);
+  const h=Math.round(Math.min(field==='uWipe'?384:512,(field==='uWipe'?512:768)/Math.max(1,win.innerWidth/win.innerHeight))),w=Math.round(h*win.innerWidth/win.innerHeight);
+  const data=new Uint8Array(w*h*4);gl.readPixels(0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,data);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,previous);gl.deleteFramebuffer(fb);gl.activeTexture(active);
+  if(point)return data[(Math.floor((1-point.y)*h)*w+Math.floor(point.x*w))*4+3];
+  let sum=0;for(let i=field==='uWipe'?3:0;i<data.length;i+=4)sum+=data[i];return sum;
+ }
+ for(const [w,h] of [[1100,650],[1440,900],[1024,768],[768,1024],[320,568],[390,700],[430,932],[844,390],[667,375],[390,600],[1100,650]]){
+  frame.style.width=w+'px';frame.style.height=h+'px';
+  win.dispatchEvent(new Event('fullscreenchange'));await wait(500);
+  check(canvas.width>0&&Math.abs(canvas.width/canvas.height-w/h)<.01,'canvas aspect '+w+'x'+h);
+  const logoBox=logo.getBoundingClientRect(),sx=logoBox.width/image.width,sy=logoBox.height/image.height;
+  check(logoBox.left+minX*sx>=0&&logoBox.top+minY*sy>=0&&logoBox.left+maxX*sx<=w&&logoBox.top+maxY*sy<=h,'visible logo stays in viewport '+w+'x'+h);
+  const tools=doc.querySelector('.gesture-tools').getBoundingClientRect();
+  check(tools.left>=0&&tools.top>=0&&tools.right<=w&&tools.bottom<=h,'buttons stay in viewport '+w+'x'+h);
+  const phone=win.matchMedia('(max-width: 600px) and (orientation: portrait), (max-width: 960px) and (max-height: 600px) and (orientation: landscape)').matches;
+  if(phone){
+   const title=doc.querySelector('.eyebrow').getBoundingClientRect();
+   check(logoBox.bottom<=title.top,'logo and experiment title do not overlap '+w+'x'+h);
+   check(Math.abs(logoBox.width/logoBox.height-logo.naturalWidth/logo.naturalHeight)<.01,'logo keeps aspect '+w+'x'+h);
+   check(doc.documentElement.scrollWidth===w,'no horizontal overflow '+w+'x'+h);
+   check(win.getComputedStyle(doc.querySelector('.bottom-note')).writingMode==='horizontal-tb','GLASS STUDY stays horizontal '+w+'x'+h);
+   check(w<h ? Math.abs((tools.left+tools.right)/2-w/2)<1&&tools.top>h/2 : tools.top<50&&tools.left>w/2,'orientation positions controls '+w+'x'+h);
+   check(uniform('uPhoneLayout')===1,'phone artwork cover fit '+w+'x'+h);
+  }else check(uniform('uPhoneLayout')===0,'desktop/tablet artwork fit unchanged '+w+'x'+h);
+  const resolution=uniform('uResolution');
+  check(resolution[0]===canvas.width&&resolution[1]===canvas.height,'shader matches drawing buffer '+w+'x'+h);
+  const before=mask('uWater');await wait(700);
+  check(mask('uWater')!==before,'animation advances '+w+'x'+h);
+  doc.querySelector('#clear-strokes').click();await wait(100);
+  const send=(type,x,y)=>canvas.dispatchEvent(new win.PointerEvent(type,{pointerId:7,pointerType:'mouse',button:0,buttons:type==='pointerup'?0:1,clientX:x*w,clientY:y*h,bubbles:true}));
+  send('pointerdown',.35,.55);send('pointermove',.6,.55);send('pointerup',.6,.55);await wait(150);
+  check(mask()>0,'wipe reaches GPU after resize '+w+'x'+h);
+  check(mask('uWipe',{x:.475,y:.55})>0&&mask('uWipe',{x:.475,y:.2})===0,'wipe coordinates match pointer '+w+'x'+h);
+  // Read the alpha at the actual normalized stroke center, not just any pixel.
+  const total=mask();win.dispatchEvent(new Event('resize'));await wait(120);
+  check(mask()===total,'duplicate resize keeps the stroke '+w+'x'+h);
+  check(gl.getError()===gl.NO_ERROR,'no WebGL errors '+w+'x'+h);
+ }
+ output.textContent=results.join('\n')+'\nALL CHECKS PASSED';
+}catch(error){output.textContent=results.join('\n')+'\nFAIL '+error.stack;}
+</script>

@@ -46,6 +46,7 @@ varying vec2 vUv;
 uniform vec2 uResolution;
 uniform sampler2D uBackground, uWater, uTracks;
 uniform float uBackgroundAspect;
+uniform float uPhoneLayout;
 // The hand tracker and mirror share one camera stream.
 uniform sampler2D uCamera;
 uniform float uCameraReady, uCameraAspect;
@@ -159,6 +160,10 @@ vec3 background(vec2 uv) {
   vec2 fit = aspect > uBackgroundAspect
     ? vec2(aspect/uBackgroundAspect,1.0)
     : vec2(1.0,uBackgroundAspect/aspect);
+  // Cover-fit on phones: do not stretch clamped artwork edges into long bands.
+  if (uPhoneLayout > .5) fit = aspect > uBackgroundAspect
+    ? vec2(1.0,uBackgroundAspect/aspect)
+    : vec2(aspect/uBackgroundAspect,1.0);
   vec3 base = texture2D(uBackground, clamp((uv-.5)*fit+.5, .001, .999)).rgb;
   // Grade only the artwork, before camera compositing. White artwork maps to
   // grey mist-blue with about 20% less luminance; preserve its printed detail.
@@ -284,8 +289,11 @@ renderer.debug.onShaderError = (gl, program, vertex, fragment) => {
 };
 
 const viewport = { width: 0, height: 0, ratio: 0 };
+const phoneLayout = matchMedia('(max-width: 600px) and (orientation: portrait), (max-width: 960px) and (max-height: 600px) and (orientation: landscape)');
+uniforms.uPhoneLayout = { value: phoneLayout.matches ? 1 : 0 };
 let resizePending = false;
 function resize() {
+  uniforms.uPhoneLayout.value = phoneLayout.matches ? 1 : 0;
   // Cap both DPR and total fill rate, especially on high-DPR mobile screens.
   const bounds = host.getBoundingClientRect();
   const width = Math.max(1,Math.round(bounds.width)), height = Math.max(1,Math.round(bounds.height));
@@ -315,6 +323,8 @@ function resize() {
 }
 const scheduleResize = () => { resizePending = true; };
 window.addEventListener('resize', scheduleResize);
+window.addEventListener('orientationchange', scheduleResize);
+phoneLayout.addEventListener('change', scheduleResize);
 document.addEventListener('fullscreenchange', scheduleResize);
 window.visualViewport?.addEventListener('resize', scheduleResize);
 new ResizeObserver(scheduleResize).observe(host);

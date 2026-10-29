@@ -1,0 +1,55 @@
+<!doctype html><meta charset="utf-8"><title>Wiping regression checks</title>
+<pre id="result">RUNNING</pre>
+<iframe id="preview" style="width:900px;height:650px;border:0"></iframe>
+<script type="module">
+import { GlassWiping } from '../wiping.js';
+const results = [];
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+  results.push('PASS '+message);
+}
+try {
+  const parameters = { wipeStrength:1, wipeRange:1, refogSpeed:1 };
+  const wiping = new GlassWiping(parameters);
+  wiping.resize(1.4); wiping.update(0);
+  check(!wiping.update(.1),'idle field stays cached');
+  wiping.stroke({x:.2,y:.5,time:0},{x:.8,y:.5,time:500});
+  const alpha = (x,y) => wiping.ctx.getImageData(Math.round(x*wiping.canvas.width),Math.round(y*wiping.canvas.height),1,1).data[3];
+  const initial = alpha(.5,.5);
+  check(initial>180,'fast stroke interpolates a continuous clear path');
+  check(alpha(.5,.1)===0,'outside film stays unchanged');
+  check(wiping.update(0),'stroke marks texture dirty');
+  for(let i=0;i<400;i++) wiping.update(.05);
+  check(alpha(.5,.5)===initial,'all strokes are retained for at least twenty seconds');
+  for(let i=0;i<100;i++) wiping.update(.05);
+  check(alpha(.5,.5)<initial && alpha(.5,.5)>0,'smooth partial recondensation after retention');
+  for(let i=0;i<120;i++) wiping.update(.05);
+  check(alpha(.5,.5)===0 && !wiping.active,'fully recondenses and stops updating after retention plus eleven seconds');
+  wiping.stroke({x:.2,y:.5,time:0},{x:.8,y:.5,time:500});
+  wiping.resize(.6);
+  check(alpha(.5,.5)>0,'rotation preserves normalized stroke');
+  wiping.reset();
+  check(alpha(.5,.5)===0,'regeneration clears wiping');
+  const frame = document.getElementById('preview');
+  await new Promise(resolve => { frame.onload=resolve; frame.src='../index.html'; });
+  const win = frame.contentWindow;
+  for(let i=0;i<200 && !win.document.getElementById('status').hidden;i++) await new Promise(resolve=>setTimeout(resolve,100));
+  check(win.document.getElementById('status').hidden,'actual WebGL shader renders');
+  const canvas = win.document.querySelector('#experiment canvas');
+  const gl = canvas.getContext('webgl2');
+  const program = gl.getParameter(gl.CURRENT_PROGRAM);
+  check(!!program && gl.getProgramParameter(program,gl.LINK_STATUS),'GLSL program compiles and links');
+  check(win.getComputedStyle(canvas).touchAction==='none','glass prevents native touch scrolling');
+  check(!win.document.querySelector('.controls, input[type=range]'),'parameter panel removed from DOM');
+  const fixed = (await win.eval("import("+JSON.stringify(new URL('../main.js',import.meta.url).href)+")")).parameters;
+  check(Object.isFrozen(fixed),'exhibition settings are immutable');
+  check(fixed.wipeStrength===.5 && fixed.wipeRange===.5 && fixed.refogSpeed===1,'fixed wiping settings');
+  const v2 = new GlassWiping(fixed);
+  v2.resize(1.4); v2.stroke({x:.2,y:.5,time:0},{x:.8,y:.5,time:500});
+  const pixels = v2.ctx.getImageData(0,0,v2.canvas.width,v2.canvas.height).data;
+  const peak = pixels.filter((_,i)=>i%4===3).reduce((a,b)=>Math.max(a,b),0);
+  check(peak>150,'half-strength wiping produces a visible clear core');
+  check(v2.ctx.getImageData(10,10,1,1).data[3]===0,'unwiped film remains intact');
+  document.getElementById('result').textContent=results.join('\n')+'\nALL CHECKS PASSED';
+} catch(error) { document.getElementById('result').textContent=results.join('\n')+'\nFAIL '+error.stack; }
+</script>
